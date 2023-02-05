@@ -29,18 +29,22 @@ class Key {
 
 typedef Item = Map<String, dynamic>;
 
+/// Converts a list of strings to a list of items <List<Map<String, dynamic>>>
 List<Item> stringsToItems(List<String> strings) {
   return strings.map((string) => {'value': string}).toList();
 }
 
+/// Converts a list of strings to a list of keys
 List<Key> stringsToKeys(List<String> strings) {
   return strings.map((string) => Key(string)).toList();
 }
 
+/// Default key to be used when using stringsToItems or when keys are not provided
 const List<Key> defaultKeys = <Key>[
   Key('value'),
 ];
 
+/// Returns the highest ranking item match for a given search query considering all keys and options
 List<Item> matchSorter({
   required String searchQuery,
   required List<Item> items,
