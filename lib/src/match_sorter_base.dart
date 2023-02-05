@@ -1,5 +1,6 @@
 import 'dart:core';
 import 'package:diacritic/diacritic.dart';
+import 'package:collection/collection.dart';
 
 enum Ranking {
   noMatch,
@@ -13,12 +14,12 @@ enum Ranking {
 }
 
 class Key {
-  String key;
-  Ranking? threshold;
-  Ranking maxRanking;
-  Ranking minRanking;
+  final String key;
+  final Ranking? threshold;
+  final Ranking maxRanking;
+  final Ranking minRanking;
 
-  Key(
+  const Key(
     this.key, {
     this.threshold,
     this.maxRanking = Ranking.caseSensitiveEqual,
@@ -26,18 +27,37 @@ class Key {
   });
 }
 
-typedef Item = Map<String, String>;
+typedef Item = Map<String, dynamic>;
+
+List<Item> stringsToItems(List<String> strings) {
+  return strings.map((string) => {'value': string}).toList();
+}
+
+List<Key> stringsToKeys(List<String> strings) {
+  return strings.map((string) => Key(string)).toList();
+}
+
+const List<Key> defaultKeys = <Key>[
+  Key('value'),
+];
 
 List<Item> matchSorter({
   required String searchQuery,
   required List<Item> items,
-  required List<Key> keys,
+  List<Key> keys = defaultKeys,
   Ranking threshold = Ranking.matches,
   bool keepDiacritics = false,
   BaseSortFn baseSort = _defaultBaseSort,
-  SorterFn sorter = _defaultSorter,
+  SorterFn? sorter,
 }) {
-  List<_RankedItem> _reduceItemsToRanked(List<_RankedItem> matches, Item item) {
+  sorter = sorter ?? _createDefaultSorter(baseSort, keepDiacritics);
+
+  Item _mapToItem(_RankedItem rankedItem) {
+    return rankedItem.item;
+  }
+
+  List<_RankedItem> matchedItems = [];
+  items.forEachIndexed((int index, Item item) {
     var rankingInfo = _getHighestRanking(
         searchQuery: searchQuery,
         item: item,
@@ -45,16 +65,10 @@ List<Item> matchSorter({
         threshold: threshold,
         keepDiacritics: keepDiacritics);
     if (rankingInfo.rank.index >= rankingInfo.keyThreshold.index) {
-      matches.add(_RankedItem(item: item, rankingInfo: rankingInfo));
+      matchedItems.add(
+          _RankedItem(item: item, rankingInfo: rankingInfo, itemIndex: index));
     }
-    return matches;
-  }
-
-  Item _mapToItem(_RankedItem rankedItem) {
-    return rankedItem.item;
-  }
-
-  var matchedItems = items.fold([] as List<_RankedItem>, _reduceItemsToRanked);
+  });
   return sorter(matchedItems).map(_mapToItem).toList();
 }
 
@@ -76,22 +90,28 @@ class _ItemInfo {
   Key keyAttributes;
   int keyIndex;
 
-  _ItemInfo(
-      {required this.itemValue,
-      required this.keyAttributes,
-      required this.keyIndex});
+  _ItemInfo({
+    required this.itemValue,
+    required this.keyAttributes,
+    required this.keyIndex,
+  });
 }
 
 class _RankedItem {
   Item item;
   _RankingInfo rankingInfo;
+  int itemIndex;
 
-  _RankedItem({required this.item, required this.rankingInfo});
+  _RankedItem(
+      {required this.item, required this.rankingInfo, required this.itemIndex});
 }
 
 typedef BaseSortFn = int Function(_RankedItem a, _RankedItem b);
 int _defaultBaseSort(_RankedItem a, _RankedItem b) {
-  return a.rankingInfo.rankedValue.compareTo(b.rankingInfo.rankedValue);
+  var firstString = a.rankingInfo.rankedValue.toLowerCase();
+  var secondString = b.rankingInfo.rankedValue.toLowerCase();
+
+  return compareNatural(firstString, secondString);
 }
 
 typedef SortRankedFn = int Function(
@@ -117,21 +137,24 @@ int _sortRankedValues(_RankedItem a, _RankedItem b, BaseSortFn baseSort) {
 }
 
 typedef SorterFn = List<_RankedItem> Function(List<_RankedItem> items);
-List<_RankedItem> _defaultSorter(List<_RankedItem> items) {
-  List<_RankedItem> sortedItems = List.from(items);
+SorterFn _createDefaultSorter(BaseSortFn baseSort, bool keepDiacritics) {
+  return (List<_RankedItem> items) {
+    List<_RankedItem> sortedItems = List.from(items);
 
-  int _compare(_RankedItem a, _RankedItem b) {
-    return _sortRankedValues(a, b, _defaultBaseSort);
-  }
+    int _compare(_RankedItem a, _RankedItem b) {
+      return _sortRankedValues(a, b, baseSort);
+    }
 
-  sortedItems.sort(_compare);
-  return sortedItems;
+    sortedItems.sort(_compare);
+    return sortedItems;
+  };
 }
 
 List<_ItemInfo> _getAllValuesToRank({
   required Item item,
   required List<Key> keys,
   required Ranking threshold,
+  required bool keepDiacritics,
 }) {
   List<_ItemInfo> _itemInfo = [];
   for (var keyIndex = 0; keyIndex < keys.length; keyIndex++) {
@@ -141,13 +164,21 @@ List<_ItemInfo> _getAllValuesToRank({
         maxRanking: key.maxRanking,
         minRanking: key.minRanking);
 
-    for (var itemIndex = 0; itemIndex < item.length; itemIndex++) {
+    for (var itemKeysIndex = 0;
+        itemKeysIndex < item.keys.length;
+        itemKeysIndex++) {
       if (item.containsKey(key.key)) {
-        String itemValue = item[key.key]!;
+        var itemValue = item[key.key];
+        if (itemValue == null || itemValue is String == false) {
+          continue;
+        }
         _itemInfo.add(_ItemInfo(
-            itemValue: itemValue,
-            keyAttributes: keyAttributes,
-            keyIndex: keyIndex));
+          // remove diacrtrics if keepDiacritics is false from the item value (it's a detour from the JS version)
+          itemValue: _prepareValueForComparison(
+              value: itemValue as String, keepDiacritics: keepDiacritics),
+          keyAttributes: keyAttributes,
+          keyIndex: keyIndex,
+        ));
       }
     }
   }
@@ -161,8 +192,11 @@ _RankingInfo _getHighestRanking({
   required Ranking threshold,
   required bool keepDiacritics,
 }) {
-  var rankedValues =
-      _getAllValuesToRank(item: item, keys: keys, threshold: threshold);
+  var rankedValues = _getAllValuesToRank(
+      item: item,
+      keys: keys,
+      threshold: threshold,
+      keepDiacritics: keepDiacritics);
 
   var initialValue = _RankingInfo(
       rankedValue: '',
@@ -182,12 +216,12 @@ _RankingInfo _getHighestRanking({
     var newRankedValue = previousValue.rankedValue;
 
     if (newRank.index < element.keyAttributes.minRanking.index &&
-        newRank.index >= Ranking.noMatch.index) {
+        newRank.index >= Ranking.matches.index) {
       newRank = element.keyAttributes.minRanking;
     } else if (newRank.index > element.keyAttributes.maxRanking.index) {
       newRank = element.keyAttributes.maxRanking;
     }
-    if (newRank.index > previousValue.rank.index) {
+    if (newRank.index > rank.index) {
       rank = newRank;
       keyIndex = element.keyIndex;
       keyThreshold = element.keyAttributes.threshold ?? threshold;
@@ -255,7 +289,7 @@ Ranking _getMatchRanking({
   }
 
   // acronym
-  if (_getAcronym(testString) == stringToRank) {
+  if (_getAcronym(testString).contains(stringToRank)) {
     return Ranking.acronym;
   }
 
@@ -306,7 +340,7 @@ Ranking _getClosenessRanking({
     var inOrderPercentage = matchingInOrderCharCount / stringToRank.length;
     var ranking =
         Ranking.matches.index + (inOrderPercentage * spreadPercentage);
-    return Ranking.values[ranking.round()];
+    return Ranking.values[ranking.floor()];
   }
 
   var firstIndex = findMatchingCharacter(stringToRank[0], testString, 0);
