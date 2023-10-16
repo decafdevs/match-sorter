@@ -7,3 +7,7 @@
 ## 0.1.1
 
 - Fix RangeError when splitByHyphenWord is empty
+
+## 0.2.0
+
+- Update collections version in dependencies

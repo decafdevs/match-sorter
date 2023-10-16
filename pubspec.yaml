@@ -1,6 +1,6 @@
 name: match_sorter
 description: A dart adaptation of the match-sorter package for javascript
-version: 0.1.1
+version: 0.2.0
 homepage: https://github.com/decafdevs/match-sorter
 
 environment:
@@ -8,7 +8,7 @@ environment:
 
 dependencies:
   diacritic: ^0.1.3
-  collection: 1.17.2
+  collection: ^1.17.2
 
 dev_dependencies:
   lints: ^1.0.0
