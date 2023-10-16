@@ -316,7 +316,9 @@ String _getAcronym(String string) {
         j < splitByHyphenWordsLength;
         j++) {
       var splitByHyphenWord = splitByHyphenWords[j];
-      acronym += splitByHyphenWord.substring(0, 1);
+      if (splitByHyphenWord.isNotEmpty) {
+        acronym += splitByHyphenWord.substring(0, 1);
+      }
     }
   }
   return acronym;
